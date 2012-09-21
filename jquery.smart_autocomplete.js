@@ -67,6 +67,7 @@
                                  }
 
     var default_options = {
+                            autocompleteTriggered: false,
                             minCharLimit: 1, 
                             maxCharLimit: null, 
                             maxResults: null,
@@ -142,12 +143,14 @@
       _default: function(ev){
         var context = ev.target;
         var options = $(context).data("smart-autocomplete");
-        var source = options.source || null;
+        var source = options.activeSource || null;
         var filter = options.filter;
         var maxChars = (options.maxCharLimit > 0 ?  options.maxCharLimit : Number.POSITIVE_INFINITY)
 
         //event specific data
         var query = ev.smartAutocompleteData.query;
+        
+        options.lastQuery = query;
 
         if(options.disabled || (query.length > maxChars)){
           $(context).trigger('lostFocus');
@@ -162,7 +165,7 @@
 
         //call the filter function with delay
         setTimeout(function(){
-          $.when( filter.apply(options, [query, options.source]) ).done(function( results ){
+          $.when( filter.apply(options, [query, options.activeSource]) ).done(function( results ){
             //do the trimming
             var trimmed_results = (options.maxResults > 0 ? results.splice(0, options.maxResults) : results);
 
@@ -300,14 +303,24 @@
 
         //get the text from selected item
         var selected_value = $(selected_item).text() || $(selected_item).val();
-        //set it as the value of the autocomplete field
-        $(context).val(selected_value); 
+        
+        if (selected_value)
+        {
+          //insert the text into the autocomplete field
+          var oldText = $(context).val();
+          var newBeginning = oldText.substring(0, options.searchStart).concat(selected_value);
+          var newIndex = newBeginning.length;
+          var newEnd = oldText.substring(options.searchStart + options.lastQuery.length);
+          if (newEnd.length > 0 && newEnd[0] != ' ')
+            newBeginning = newBeginning.concat(' ');
+          $(context).val(newBeginning.concat(newEnd)); 
 
-        //set item selected property
-        options.setItemSelected(true);
+          //set item selected property
+          options.setItemSelected(true);
 
-        //set number of current chars in field 
-        options.originalCharCount = $(context).val().length;
+          //set number of current chars in field 
+          options.originalCharCount = $(context).val().length;
+        }
         
         //trigger lost focus
         $(context).trigger('lostFocus');
@@ -361,6 +374,9 @@
 
         //set current selection to null
         options.currentSelection = null;
+        
+        if (options.triggerCode != -1)
+          options.autocompleteTriggered = false;
       }
     };
 
@@ -371,6 +387,33 @@
       var options = $.extend(default_options, $(this).data("smart-autocomplete"), passed_options);
       //set the context
       options['context'] = this;
+      
+      //initialize source data
+      if (options['source']){
+        options['activeSource'] = options['source']; 
+        
+        //set the triggerCode if trigger is set, else set autocompleteTriggered
+        //to true to work without triggers
+        if (options['trigger'] && options['trigger'].length > 0){
+          options['triggerCode'] = options['trigger'].charCodeAt(0);
+        }
+        else{
+          options['triggerCode'] = -1;
+          options['searchStart'] = 0;
+          options['autocompleteTriggered'] = true;
+        }
+      }
+      else if(options['sources']){
+        var sources = options['sources'];
+        var len = sources.length;
+        for (var i=0; i<len; i++){
+          if (i in sources){
+            var source = sources[i];
+            var triggerKey = source['trigger'];
+            source['triggerCode'] = triggerKey && triggerKey.length > 0 ? triggerKey.charCodeAt(0) : -1;
+          }
+        }
+      }
 
       //if a result container is not defined
       if($.type(options.resultsContainer) === 'undefined' ){
@@ -389,84 +432,132 @@
         //get the options
         var options = $(this).data("smart-autocomplete");
 
-        //up arrow
-        if(ev.keyCode == '38'){
+        if(options.autocompleteTriggered) {
+          //up arrow
+          if(ev.keyCode == '38'){
 
-          if(options.resultsContainer){
-            var current_selection = options.currentSelection || 0;
-            var result_suggestions = $(options.resultsContainer).children();
+            if(options.resultsContainer){
+              var current_selection = options.currentSelection || 0;
+              var result_suggestions = $(options.resultsContainer).children();
 
-            if(current_selection >= 0)
-              $(options.context).trigger('itemUnfocus', result_suggestions[current_selection] );
+              if(current_selection >= 0)
+                $(options.context).trigger('itemUnfocus', result_suggestions[current_selection] );
 
-            if(--current_selection <= 0)
-              current_selection = 0;
+              if(--current_selection <= 0)
+                current_selection = 0;
 
-            options['currentSelection'] = current_selection;
+              options['currentSelection'] = current_selection;
 
-            $(options.context).trigger('itemFocus', [ result_suggestions[current_selection] ] );
+              $(options.context).trigger('itemFocus', [ result_suggestions[current_selection] ] );
+            }
           }
-        }
 
-        //down arrow
-        else if(ev.keyCode == '40'){
+          //down arrow
+          else if(ev.keyCode == '40'){
 
-          if(options.resultsContainer && options.resultsContainer.is(':visible')){
-            var current_selection = options.currentSelection;
-            var result_suggestions = $(options.resultsContainer).children();
+            if(options.resultsContainer && options.resultsContainer.is(':visible')){
+              var current_selection = options.currentSelection;
+              var result_suggestions = $(options.resultsContainer).children();
 
-            if(current_selection >= 0)
-              $(options.context).trigger('itemUnfocus', result_suggestions[current_selection] );
+              if(current_selection != null && current_selection >= 0)
+                $(options.context).trigger('itemUnfocus', result_suggestions[current_selection] );
 
-            if(isNaN(current_selection) || null == current_selection || (++current_selection >= result_suggestions.length) )
-              current_selection = 0;
+              if(isNaN(current_selection) || null == current_selection || (++current_selection >= result_suggestions.length) )
+                current_selection = 0;
 
-            options['currentSelection'] = current_selection;
+              options['currentSelection'] = current_selection;
 
-            $(options.context).trigger('itemFocus', [ result_suggestions[current_selection] ] );
-          }
-          //trigger keyIn event on down key
-          else {
-            $(options.context).trigger('keyIn', [$(this).val()]); 
-          }
+              $(options.context).trigger('itemFocus', [ result_suggestions[current_selection] ] );
+            }
+            //trigger keyIn event on down key
+            else {
+              $(options.context).trigger('keyIn', [$(this).val()]); 
+            }
           
-        }
+          }
 
-        //right arrow & enter key
-        else if(ev.keyCode == '39' || ev.keyCode == '13'){
-          var type_ahead_field = $(options.context).prev('.smart_autocomplete_type_ahead_field');
-          if(options.resultsContainer && $(options.resultsContainer).is(':visible')){
+          //right arrow, enter key, and spacebar
+          else if(ev.keyCode == '39' || ev.keyCode == '13' || ev.keyCode == '32'){
+            var type_ahead_field = $(options.context).prev('.smart_autocomplete_type_ahead_field');
+            if(options.resultsContainer && $(options.resultsContainer).is(':visible')){
+              var current_selection = options.currentSelection;
+              var result_suggestions = $(options.resultsContainer).children();
+
+              $(options.context).trigger('itemSelect', [ result_suggestions[current_selection] ] );
+            }
+            else if(options.typeAhead && type_ahead_field.is(':visible'))
+              $(options.context).trigger('itemSelect', [ type_ahead_field ] );
+
+            return false;
+          }
+        
+          //ESC key
+          else if (ev.keyCode == '27' && options.resultsContainer && options.resultsContainer.is(':visible')){
             var current_selection = options.currentSelection;
             var result_suggestions = $(options.resultsContainer).children();
 
-            $(options.context).trigger('itemSelect', [ result_suggestions[current_selection] ] );
+            if(current_selection != null && current_selection >= 0)
+              $(options.context).trigger('itemUnfocus', result_suggestions[current_selection] );
+
+            options['currentSelection'] = null;
           }
-          else if(options.typeAhead && type_ahead_field.is(':visible'))
-            $(options.context).trigger('itemSelect', [ type_ahead_field ] );
 
-          return false;
-        }
+          else {
+            var current_char_count = ev.target.selectionStart - options.searchStart;
+         
+            //check whether the string has modified
+            if(current_char_count == 0 || options.originalCharCount == $(options.context).val().length)
+              return;
 
-        else {
-         var current_char_count = $(options.context).val().length;
-         //check whether the string has modified
-         if(options.originalCharCount == current_char_count)
-           return;
-
-         //check minimum and maximum number of characters are typed
-         if(current_char_count >= options.minCharLimit){
-          $(options.context).trigger('keyIn', [$(this).val()]); 
-         }
-         else{
-            if(options.autocompleteFocused){ 
+            //check minimum and maximum number of characters are typed
+            if(current_char_count >= options.minCharLimit){
+              var text = $(this).val().substring(options.searchStart, ev.target.selectionStart);
+              $(options.context).trigger('keyIn', [ text ]); 
+            }
+            else{ 
               options.currentSelection = null;
               $(options.context).trigger('lostFocus');
             }
-         }
-
+          }
         }
       });
 
+      $(this).keypress(function(ev){
+        //get the options
+        var options = $(this).data("smart-autocomplete");
+        
+        if (!options.autocompleteTriggered)
+        {
+          //trigger key
+          if(options.source && ev.which == options.triggerCode){
+            options.autocompleteTriggered = true;
+          }
+          else if (options.sources)
+          {
+            var len = options.sources.length;
+            for (var i=0; i<len; i++){
+              if (i in options.sources && options.sources[i].source && ev.which == options.sources[i].triggerCode){
+                options.autocompleteTriggered = true;
+                options.activeSource = options.sources[i].source;
+                break;
+              }
+            }
+          }
+          
+          if (options.autocompleteTriggered)
+          {
+            options.searchStart = ev.target.selectionStart + 1;
+          }
+        }
+      });
+      
+      $(this).keydown(function(ev){
+        if(options.autocompleteTriggered) {
+          if(ev.keyCode == '38' || ev.keyCode == '40')
+            ev.preventDefault();
+        }
+      });
+      
       $(this).focus(function(){
         //if the field is in a form capture the return key event 
         $(this).closest("form").bind("keydown.block_for_smart_autocomplete", function(ev){
